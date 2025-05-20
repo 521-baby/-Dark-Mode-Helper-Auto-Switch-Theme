@@ -3,10 +3,27 @@
 ### 访客人数：
 <img src="https://count.kjchmc.cn/get/@-Dark-Mode-Helper-Auto-Switch-Theme?theme=asoul" alt="如果您无法看到此内容，请刷新页面。">  
 ### 🔗 其他链接 
-6
-- 脚本源码：[GitHub 仓库](https://github.com/521-baby/VIP-Movie-Analysis)    
-7
-- 如果有帮助到你<img src='https://github.com/521-baby/Bypass-Web-Restrictions/blob/main/%E7%A0%B4%E9%99%A4%E7%BD%91%E9%A1%B5%E9%99%90%E5%88%B6.js' width='16px' /> 投喂渠道：[⚡爱发电](https://afdian.com/a/chunshu) or [微信赞赏](https://github.com/521-baby/521-baby/blob/main/DONATE.md) or [支付宝](https://github.com/521-baby/521-baby/blob/main/DONATE2.md)</del>
+
+- 脚本源码：[GitHub 仓库](https://github.com/521-baby/-Dark-Mode-Helper-Auto-Switch-Theme)    
+
+- 如果有帮助到你<img src='https://github.com/521-baby/Bypass-Web-Restrictions/blob/main/%E7%A0%B4%E9%99%A4%E7%BD%91%E9%A1%B5%E9%99%90%E5%88%B6.js' width='16px' /> 投喂渠道：[⚡爱发电](https://afdian.com/a/chunshu) or [微信赞赏](https://github.com/521-baby/521-baby/blob/main/DONATE.md) or [支付宝](https://github.com/521-baby/521-baby/blob/main/DONATE2.md)</del>  
+
+## 🛠️ 安装说明  
+### 1. 安装浏览器扩展（二选一）  
+#### ▶ 油猴 (Tampermonkey)  
+- **官方网站**：[https://www.tampermonkey.net/](https://www.tampermonkey.net/)  
+#### ▶ 脚本猫 (ScriptCat)  
+
+- **官方网站**：[https://scriptcat.org/](https://scriptcat.org/)  
+### 2. 安装脚本  
+
+- 点击下方链接一键安装：  
+
+[📥 安装 ✨夜间模式助手 油猴脚本](https://greasyfork.org/zh-CN/scripts/536592-夜间模式助手)
+ 
+
+[📥 安装 ✨夜间模式助手 脚本猫脚本](https://scriptcat.org/zh-CN/script-show-page/3445)
+- 浏览器会自动跳转至安装页面，点击 **安装** 即可完成
 
 
 ## 🚀 核心功能  
