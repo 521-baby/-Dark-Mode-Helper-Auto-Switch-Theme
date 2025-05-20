@@ -1,0 +1,633 @@
+// ==UserScript==
+// @name              ✨夜间模式助手
+// @namespace
+// @version           1.0.0
+// @description       ✨ 定时自动切换夜间模式 | 4种主题切换（夜间1，暗色2，护眼3，白天4）|自定义当前模式|自定义昼夜时间| 网站白名单 | 护眼模式 🛡️👁️
+// @author            伏黑甚而
+// @license           MIT
+
+// @match             *://*/*
+// @require           https://unpkg.com/darkrule@1.0.4/dist/rule.min.js
+// @require           https://unpkg.com/sweetalert2@10.16.6/dist/sweetalert2.min.js
+// @resource          swalStyle https://unpkg.com/sweetalert2@10.16.6/dist/sweetalert2.min.css
+// @run-at            document-start
+// @grant             GM_getValue
+// @grant             GM_setValue
+// @grant             GM_registerMenuCommand
+// @grant             GM_getResourceText
+// @icon              
+// ==/UserScript==
+
+;(function () {
+    'use strict';
+
+    let util = {
+        getValue(name) {
+            return GM_getValue(name);
+        },
+
+        setValue(name, value) {
+            GM_setValue(name, value);
+        },
+
+        addStyle(id, tag, css) {
+            tag = tag || 'style';
+            let doc = document, styleDom = doc.getElementById(id);
+            if (styleDom) return;
+            let style = doc.createElement(tag);
+            style.rel = 'stylesheet';
+            style.id = id;
+            tag === 'style' ? style.innerHTML = css : style.href = css;
+            doc.head.appendChild(style);
+        },
+
+        hover(ele, fn1, fn2) {
+            ele.onmouseenter = function () {  //移入事件
+                fn1.call(ele);
+            };
+            ele.onmouseleave = function () { //移出事件
+                fn2.call(ele);
+            };
+        },
+
+        addThemeColor(color) {
+            let doc = document, meta = doc.getElementsByName('theme-color')[0];
+            if (meta) return meta.setAttribute('content', color);
+            let metaEle = doc.createElement('meta');
+            metaEle.name = 'theme-color';
+            metaEle.content = color;
+            doc.head.appendChild(metaEle);
+        },
+
+        getThemeColor() {
+            let meta = document.getElementsByName('theme-color')[0];
+            if (meta) {
+                return meta.content;
+            }
+            return '#ffffff';
+        },
+
+        removeElementById(eleId) {
+            let ele = document.getElementById(eleId);
+            ele && ele.parentNode.removeChild(ele);
+        },
+
+        hasElementById(eleId) {
+            return document.getElementById(eleId);
+        },
+
+        filter: '-webkit-filter: url(#dark-mode-filter) !important; filter: url(#dark-mode-filter) !important;',
+        reverseFilter: '-webkit-filter: url(#dark-mode-reverse-filter) !important; filter: url(#dark-mode-reverse-filter) !important;',
+        firefoxFilter: `filter: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><filter id="dark-mode-filter" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.283 -0.567 -0.567 0 0.925 -0.567 0.283 -0.567 0 0.925 -0.567 -0.567 0.283 0 0.925 0 0 0 1 0"/></filter></svg>#dark-mode-filter') !important;`,
+        firefoxReverseFilter: `filter: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><filter id="dark-mode-reverse-filter" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.333 -0.667 -0.667 0 1 -0.667 0.333 -0.667 0 1 -0.667 -0.667 0.333 0 1 0 0 0 1 0"/></filter></svg>#dark-mode-reverse-filter') !important;`,
+        noneFilter: '-webkit-filter: none !important; filter: none !important;',
+    };
+// ===== 模式数据结构与切换逻辑 =====
+const MODES = [
+    { key: 'night', name: '夜间', icon: 'moon', id: 1 },
+    { key: 'dark', name: '暗色', icon: 'eye', id: 2 },
+    { key: 'eye', name: '护眼', icon: 'palette', id: 3 },
+    { key: 'light', name: '白天', icon: 'sun', id: 4 }
+];
+function getEnabledModes() {
+    const enableEye = util.getValue('bright_dark_mode');
+    const enableDark = util.getValue('menu_forcedToEnable'); // 从设置中获取暗色模式开关
+    let modes = [MODES[0]]; // 夜间
+    if (enableEye) modes.push(MODES[1]);
+    if (enableDark) modes.push(MODES[2]);
+    modes.push(MODES[3]); // 白天
+    return modes;
+}
+function getCurrentModeIndex() {
+    const modes = getEnabledModes();
+    let current = util.getValue('menu_darkModeType') || 1;
+
+    // 自动切换模式
+    const autoSwitch = util.getValue('menu_autoSwitch');
+    if (autoSwitch && autoSwitch.includes('|')) {
+        const [dayMode, nightMode] = autoSwitch.split('|').map(Number);
+        const [dayStart, nightStart] = (util.getValue('menu_customTime') || '6:00|18:00').split('|');
+        // 解析时间
+        function parseTime(str) {
+            const [h, m] = str.split(':').map(Number);
+            return h * 60 + (m || 0);
+        }
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const dayStartMinutes = parseTime(dayStart);
+        const nightStartMinutes = parseTime(nightStart);
+
+        let isDay;
+        if (dayStartMinutes < nightStartMinutes) {
+            isDay = nowMinutes >= dayStartMinutes && nowMinutes < nightStartMinutes;
+        } else {
+            // 例如 18:00|6:00 这种跨天
+            isDay = nowMinutes >= dayStartMinutes || nowMinutes < nightStartMinutes;
+        }
+        current = isDay ? dayMode : nightMode;
+    }
+
+    let idx = modes.findIndex(m => m.id == current);
+    if (idx === -1) idx = 0;
+    return idx;
+}
+function setCurrentModeByIndex(idx) {
+    const modes = getEnabledModes();
+    util.setValue('menu_darkModeType', modes[idx].id);
+}
+    let main = {
+        /**
+         * 配置默认值
+         */
+        initValue() {
+            let value = [{
+                name: 'dark_mode',
+                value: 'light'
+            }, {
+                name: 'button_position',
+                value: 'left'
+            }, {
+                name: 'button_size',
+                value: 32
+            }, {
+                name: 'exclude_list',
+                value: ['youku.com', 'v.youku.com', 'www.douyu.com', 'www.iqiyi.com', 'vip.iqiyi.com', 'mail.qq.com', 'live.kuaishou.com']
+            }, {
+                name: 'origin_theme_color',
+                value: '#ffffff'
+            }, {
+                name: 'menu_autoRecognition',
+                value: true
+            }, {
+                name: 'menu_forcedToEnable',
+                value: false
+            }, {
+                name: 'menu_darkModeType',
+                value: 2
+            }, {
+                name: 'menu_customTime',
+                value: '6:00|18:00'
+            }, {
+                name: 'menu_autoSwitch',
+                value: ''
+            }, {
+                name: 'button_hidden',
+                value: false
+            }, {
+                name: 'bright_dark_mode',
+                value: true
+            }];
+
+            value.forEach((v) => {
+                util.getValue(v.name) === undefined && util.setValue(v.name, v.value);
+            });
+        },
+
+        addExtraStyle() {
+            try {
+                return darkModeRule;
+            } catch (e) {
+                return '';
+            }
+        },
+
+        createDarkFilter() {
+            if (util.hasElementById('dark-mode-svg')) return;
+            let svgDom = '<svg id="dark-mode-svg" style="height: 0; width: 0;"><filter id="dark-mode-filter" x="0" y="0" width="99999" height="99999"><feColorMatrix type="matrix" values="0.283 -0.567 -0.567 0 0.925 -0.567 0.283 -0.567 0 0.925 -0.567 -0.567 0.283 0 0.925 0 0 0 1 0"></feColorMatrix></filter><filter id="dark-mode-reverse-filter" x="0" y="0" width="99999" height="99999"><feColorMatrix type="matrix" values="0.333 -0.667 -0.667 0 1 -0.667 0.333 -0.667 0 1 -0.667 -0.667 0.333 0 1 0 0 0 1 0"></feColorMatrix></filter></svg>';
+            let div = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+            div.innerHTML = svgDom;
+            let frag = document.createDocumentFragment();
+            while (div.firstChild)
+                frag.appendChild(div.firstChild);
+            document.head.appendChild(frag);
+        },
+
+        createDarkStyle() {
+            util.addStyle('dark-mode-style', 'style', `
+                @media screen {
+                    html {
+                        ${this.isFirefox() ? util.firefoxFilter : util.filter}
+                        scrollbar-color: #454a4d #202324;
+                    }
+
+                    /* Default Reverse rule */
+                    img,
+                    video,
+                    iframe,
+                    canvas,
+                    :not(object):not(body) > embed,
+                    object,
+                    svg image,
+                    [style*="background:url"],
+                    [style*="background-image:url"],
+                    [style*="background: url"],
+                    [style*="background-image: url"],
+                    [background],
+                    twitterwidget,
+                    .sr-reader,
+                    .no-dark-mode,
+                    .sr-backdrop {
+                        ${this.isFirefox() ? util.firefoxReverseFilter : util.reverseFilter}
+                    }
+
+                    [style*="background:url"] *,
+                    [style*="background-image:url"] *,
+                    [style*="background: url"] *,
+                    [style*="background-image: url"] *,
+                    input,
+                    [background] *,
+                    img[src^="https://s0.wp.com/latex.php"],
+                    twitterwidget .NaturalImage-image {
+                        ${util.noneFilter}
+                    }
+
+                    /* Text contrast */
+                    html {
+                        text-shadow: 0 0 0 !important;
+                    }
+
+                    /* Full screen */
+                    .no-filter,
+                    :-webkit-full-screen,
+                    :-webkit-full-screen *,
+                    :-moz-full-screen,
+                    :-moz-full-screen *,
+                    :fullscreen,
+                    :fullscreen * {
+                        ${util.noneFilter}
+                    }
+
+                    ::-webkit-scrollbar {
+                        background-color: #202324;
+                        color: #aba499;
+                    }
+                    ::-webkit-scrollbar-thumb {
+                        background-color: #454a4d;
+                    }
+                    ::-webkit-scrollbar-thumb:hover {
+                        background-color: #575e62;
+                    }
+                    ::-webkit-scrollbar-thumb:active {
+                        background-color: #484e51;
+                    }
+                    ::-webkit-scrollbar-corner {
+                        background-color: #181a1b;
+                    }
+
+                    /* Page background */
+                    html {
+                        background: #fff !important;
+                    }
+
+                    ${this.addExtraStyle()}
+                }
+
+                @media print {
+                    .no-print {
+                        display: none !important;
+                    }
+                }`);
+        },
+
+        setThemeColor() {
+            util.setValue('origin_theme_color', util.getThemeColor());
+        },
+
+        enableDarkMode() {
+            if (this.isFullScreen()) return;
+            !this.isFirefox() && this.createDarkFilter();
+            this.createDarkStyle();
+            util.addThemeColor('#131313');
+        },
+
+        disableDarkMode() {
+            util.removeElementById('dark-mode-svg');
+            util.removeElementById('dark-mode-style');
+            util.addThemeColor(util.getValue('origin_theme_color'));
+        },
+        // 新增：根据当前模式动态切换样式
+applyCurrentModeStyle() {
+    const modes = getEnabledModes();
+    const idx = getCurrentModeIndex();
+    const mode = modes[idx];
+    // 清理所有样式
+    util.removeElementById('dark-mode-style');
+    util.removeElementById('dark-mode-svg');
+    // 夜间
+    if (mode.key === 'night') {
+        this.enableDarkMode();
+    } else if (mode.key === 'light') {
+    // 白天模式 = 亮度滤镜
+    let style_40 = (util.getValue('menu_customMode4') || '100|100').split('|');
+    let isDay = (new Date().getHours() >= 6 && new Date().getHours() < 18);
+    let brightness = isDay ? style_40[0] : style_40[1];
+    util.addStyle('dark-mode-style', 'style', `html { filter: brightness(${brightness}% ) !important; background: #fff !important; }`);
+    util.addThemeColor('#ffffff');
+}else if (mode.key === 'dark') {
+        // 护眼模式 = 亮度滤镜
+        let style_10 = (util.getValue('menu_customMode1') || '60|50').split('|');
+        let isDay = (new Date().getHours() >= 6 && new Date().getHours() < 18);
+        let brightness = isDay ? style_10[0] : style_10[1];
+        util.addStyle('dark-mode-style', 'style', `html { filter: brightness(${brightness}% ) !important; background: #fff !important; }`);
+        util.addThemeColor('#e6f7e6');
+    } else if (mode.key === 'eye') {
+        // 暗色模式 = 亮度+暖色滤镜
+        let style_20 = (util.getValue('menu_customMode2') || '60|40|50|50').split('|');
+        let isDay = (new Date().getHours() >= 6 && new Date().getHours() < 18);
+        let brightness = isDay ? style_20[0] : style_20[2];
+        let sepia = isDay ? style_20[1] : style_20[3];
+        util.addStyle('dark-mode-style', 'style', `html { filter: brightness(${brightness}% ) sepia(${sepia}% ) !important; background: #fff !important; }`);
+        util.addThemeColor('#f5e6d6');
+    }
+},
+
+        addButton() {
+    if (this.isTopWindow() && !util.getValue('button_hidden')) {
+        let buttonSize = util.getValue('button_size');
+        let buttonPosition = util.getValue('button_position');
+        let svgSize = parseInt(buttonSize * 0.6);
+        let buttonWidth = +buttonSize + 2;
+
+        // SVG 图标定义
+        const icons = {
+            moon: `<svg fill="#009fe8" id="svg-light" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"> <path d="M587.264 104.96c33.28 57.856 52.224 124.928 52.224 196.608 0 218.112-176.128 394.752-393.728 394.752-29.696 0-58.368-3.584-86.528-9.728C223.744 832.512 369.152 934.4 538.624 934.4c229.376 0 414.72-186.368 414.72-416.256 1.024-212.992-159.744-389.12-366.08-413.184z"></path> <path d="M340.48 567.808l-23.552-70.144-70.144-23.552 70.144-23.552 23.552-70.144 23.552 70.144 70.144 23.552-70.144 23.552-23.552 70.144zM168.96 361.472l-30.208-91.136-91.648-30.208 91.136-30.208 30.72-91.648 30.208 91.136 91.136 30.208-91.136 30.208-30.208 91.648z"></path> </svg>`,
+            sun: `<svg fill="#009fe8" id="svg-dark" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"> <path d="M234.24 512a277.76 277.76 0 1 0 555.52 0 277.76 277.76 0 1 0-555.52 0zM512 187.733a42.667 42.667 0 0 1-42.667-42.666v-102.4a42.667 42.667 0 0 1 85.334 0v102.826A42.667 42.667 0 0 1 512 187.733zm-258.987 107.52a42.667 42.667 0 0 1-29.866-12.373l-72.96-73.387a42.667 42.667 0 0 1 59.306-59.306l73.387 72.96a42.667 42.667 0 0 1 0 59.733 42.667 42.667 0 0 1-29.867 12.373zm-107.52 259.414H42.667a42.667 42.667 0 0 1 0-85.334h102.826a42.667 42.667 0 0 1 0 85.334zm34.134 331.946a42.667 42.667 0 0 1-29.44-72.106l72.96-73.387a42.667 42.667 0 0 1 59.733 59.733l-73.387 73.387a42.667 42.667 0 0 1-29.866 12.373zM512 1024a42.667 42.667 0 0 1-42.667-42.667V878.507a42.667 42.667 0 0 1 85.334 0v102.826A42.667 42.667 0 0 1 512 1024zm332.373-137.387a42.667 42.667 0 0 1-29.866-12.373l-73.387-73.387a42.667 42.667 0 0 1 0-59.733 42.667 42.667 0 0 1 59.733 0l72.96 73.387a42.667 42.667 0 0 1-29.44 72.106zm136.96-331.946H878.507a42.667 42.667 0 1 1 0-85.334h102.826a42.667 42.667 0 0 1 0 85.334zM770.987 295.253a42.667 42.667 0 0 1-29.867-12.373 42.667 42.667 0 0 1 0-59.733l73.387-72.96a42.667 42.667 0 1 1 59.306 59.306l-72.96 73.387a42.667 42.667 0 0 1-29.866 12.373z"></path> </svg>`,
+            eye: `<svg fill="#009fe8" id="svg-cloud" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <path d="M80 720a200 160 0 0 1 200-160h40a280 220 0 0 1 544-60 180 140 0 1 1 80 280H320A200 160 0 0 1 80 720z"/>
+</svg>`,
+            palette: `<svg fill="#009fe8" id="svg-eye" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 224c-256 0-416 224-416 288s160 288 416 288 416-224 416-288-160-288-416-288zm0 480a192 192 0 1 1 0-384 192 192 0 0 1 0 384zm0-320a128 128 0 1 0 0 256 128 128 0 0 0 0-256z"/></svg>`
+        };
+        const modes = getEnabledModes();
+        const idx = getCurrentModeIndex();
+        const mode = modes[idx];
+        let html = `<div class="no-print" id="darkmode-container" style="position: fixed; ${buttonPosition}: -${buttonWidth / 2}px; bottom: 25px; cursor: pointer; z-index: 2147483647; user-select: none;">
+            <div id="darkmode-button" style="width: ${buttonSize}px;height: ${buttonSize}px;background: #fff;border:1px solid #f6f6f6;display: flex;align-items: center;justify-content: center;border-radius: 50%;position: relative;">
+                ${icons[mode.icon]}
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+        let containerDOM = document.getElementById('darkmode-container');
+        let buttonDOM = document.getElementById('darkmode-button');
+        util.hover(containerDOM, () => {
+            containerDOM.style[buttonPosition] = '0px';
+            containerDOM.style.transition = `${buttonPosition} 0.3s`
+        }, () => {
+            containerDOM.style[buttonPosition] = `-${buttonWidth / 2}px`;
+            containerDOM.style.transition = `${buttonPosition} 0.3s`
+        });
+        buttonDOM.addEventListener("click", () => {
+    const modes = getEnabledModes();
+    let idx = getCurrentModeIndex();
+    idx = (idx + 1) % modes.length;
+    setCurrentModeByIndex(idx);
+    main.applyCurrentModeStyle();
+    // 重新渲染按钮
+    document.getElementById('darkmode-container')?.remove();
+    this.addButton();
+});
+    }
+},
+
+        registerMenuCommand() {
+            if (this.isTopWindow()) {
+                let whiteList = util.getValue('exclude_list');
+                let host = location.host;
+                if (whiteList.includes(host)) {
+                    GM_registerMenuCommand('💡 当前网站：❌', () => {
+                        let index = whiteList.indexOf(host);
+                        whiteList.splice(index, 1);
+                        util.setValue('exclude_list', whiteList);
+                        history.go(0);
+                    });
+                } else {
+                    GM_registerMenuCommand('💡 当前网站：✔️', () => {
+                        whiteList.push(host);
+                        util.setValue('exclude_list', Array.from(new Set(whiteList)));
+                        history.go(0);
+                    });
+                }
+
+                GM_registerMenuCommand('⚙️ 设置', () => {
+                    let style = `
+                                .darkmode-popup { font-size: 14px !important; }
+                                .darkmode-center { display: flex;align-items: center; }
+                                .darkmode-setting-label { display: flex;align-items: center;justify-content: space-between;padding-top: 15px; }
+                                .darkmode-setting-label-col { display: flex;align-items: flex-start;;padding-top: 15px;flex-direction:column }
+                                .darkmode-setting-radio { width: 16px;height: 16px; }
+                                .darkmode-setting-textarea { width: 100%; margin: 14px 0 0; height: 100px; resize: none; border: 1px solid #bbb; box-sizing: border-box; padding: 5px 10px; border-radius: 5px; color: #666; line-height: 1.2; }
+                                .darkmode-setting-input { border: 1px solid #bbb; box-sizing: border-box; padding: 5px 10px; border-radius: 5px; width: 100px}
+                            `;
+                    util.addStyle('darkmode-style', 'style', style);
+                    util.addStyle('swal-pub-style', 'style', GM_getResourceText('swalStyle'));
+                    let excludeListStr = util.getValue('exclude_list').join('\n');
+
+                    let dom = `<div style="font-size: 1em;">
+                            <div style="text-align: center; margin-bottom: 20px;">
+                                <img src="" style="width:141px; height:141px; display: block; margin: 0 auto;">
+                            </div>
+                            <p style="color: #666; text-align: center; margin: 10px 0 0; font-size: 0.9em;">
+                                生活不易，猪猪叹气 —— 赏口饲料，让我少气！🐷✨
+                            </p>
+                            <label class="darkmode-setting-label">按钮位置 <div id="S-Dark-Position" class="darkmode-center"><input type="radio" name="buttonPosition" ${util.getValue('button_position') === 'left' ? 'checked' : ''} class="darkmode-setting-radio" value="left">左 <input type="radio" name="buttonPosition" style="margin-left: 30px;" ${util.getValue('button_position') === 'right' ? 'checked' : ''} class="darkmode-setting-radio" value="right">右</div></label>
+                              <label class="darkmode-setting-label"><span style="text-align: left;">按钮大小（默认：30）<small id="currentSize">当前：${util.getValue('button_size')}</small></span>
+                              <input id="S-Dark-Size" type="range" class="darkmode-setting-range" min="20" max="50" step="2" value="${util.getValue('button_size')}">
+                              </label>
+                              <label class="darkmode-setting-label-col">排除下列网址 <textarea placeholder="列表中的域名将不开启夜间模式，一行一个，例如：v.youku.com" id="S-Dark-Exclude" class="darkmode-setting-textarea">${excludeListStr}</textarea></label>
+                              <label class="darkmode-setting-label">智能排除自带暗黑模式的网页 (beta) <input type="checkbox" ${util.getValue('menu_autoRecognition') ? 'checked' : ''} id="S-Dark-AutoRecognition"></label>
+                              <label class="darkmode-setting-label">开启暗色选项 <input type="checkbox" ${util.getValue('bright_dark_mode') ? 'checked' : ''} id="S-Dark-BrightDarkMode"></label>
+                              <label class="darkmode-setting-label">开启护眼选项 <input type="checkbox" ${util.getValue('menu_forcedToEnable') ? 'checked' : ''} id="S-Dark-ForcedToEnable"></label>
+                              <label class="darkmode-setting-label">按钮隐藏 <input type="checkbox" ${util.getValue('button_hidden') ? 'checked' : ''} id="S-Dark-ButtonHidden"></label>
+                            </div>`;
+                    Swal.fire({
+                        title: '夜间模式配置',
+                        html: dom,
+                        icon: 'none',
+                        showCloseButton: true,
+                        confirmButtonText: '保存',
+                        customClass: {
+                            popup: 'darkmode-popup'
+                        },
+                        width: '480px',
+                    }).then((res) => {
+                        res.isConfirmed && history.go(0);
+                    });
+
+                    document.getElementById('S-Dark-Position').addEventListener('click', (e) => {
+                        e.target.tagName === "INPUT" && util.setValue('button_position', e.target.value);
+                    });
+                    document.getElementById('S-Dark-Size').addEventListener('change', (e) => {
+                        util.setValue('button_size', e.currentTarget.value);
+                        document.getElementById('currentSize').innerText = '当前：' + e.currentTarget.value;
+                    });
+                    document.getElementById('S-Dark-Exclude').addEventListener('change', (e) => {
+                        util.setValue('exclude_list', Array.from(new Set(e.currentTarget.value.split('\n').filter(Boolean))));
+                    });
+                    document.getElementById('S-Dark-AutoRecognition').addEventListener('change', (e) => {
+                        util.setValue('menu_autoRecognition', e.currentTarget.checked);
+                    });
+                    document.getElementById('S-Dark-ForcedToEnable').addEventListener('change', (e) => {
+                        util.setValue('menu_forcedToEnable', e.currentTarget.checked);
+                    });
+                    document.getElementById('S-Dark-BrightDarkMode').addEventListener('change', (e) => {
+                        util.setValue('bright_dark_mode', e.currentTarget.checked);
+                    });
+                    document.getElementById('S-Dark-ButtonHidden').addEventListener('change', (e) => {
+                        util.setValue('button_hidden', e.currentTarget.checked);
+                    });
+                });
+
+                // 动态菜单项，显示当前模式编号和名称
+const modes = getEnabledModes();
+const idx = getCurrentModeIndex();
+const mode = modes[idx];
+GM_registerMenuCommand(`${mode.id}️⃣${mode.name} 切换模式`, () => {
+    let idx = getCurrentModeIndex();
+    idx = (idx + 1) % modes.length;
+    setCurrentModeByIndex(idx);
+    main.applyCurrentModeStyle();
+    document.getElementById('darkmode-container')?.remove();
+    main.addButton();
+    location.reload();
+});
+
+                GM_registerMenuCommand('⚙️ 自定义当前模式', () => {
+    const currentMode = util.getValue('menu_darkModeType');
+    let tip, defaults, name;
+    switch (currentMode) {
+        case 1:
+            tip = '自定义 [夜间模式]，修改后立即生效 (部分网页可能需要刷新)~\n格式：亮度 (白天)|亮度 (晚上)\n默认：60|50（均为百分比 1~100，不需要 % 符号）';
+            defaults = '60|50';
+            name = 'menu_customMode1';
+            break;
+        case 2:
+            tip = '自定义 [暗色模式]，修改后立即生效 (部分网页可能需要刷新)~\n格式：亮度 (白天)|暖色 (白天)|亮度 (晚上)|暖色 (晚上)\n默认：60|40|50|50（均为百分比 1~100，不需要 % 符号）';
+            defaults = '60|40|50|50';
+            name = 'menu_customMode2';
+            break;
+        case 3:
+            tip = '自定义 [护眼模式]，修改后立即生效 (部分网页可能需要刷新)~\n格式：反色\n默认：90（均为百分比 50~100，不需要 % 符号）';
+            defaults = '90';
+            name = 'menu_customMode3';
+            break;
+        case 4:
+    tip = '自定义 [白天模式]，修改后立即生效 (部分网页可能需要刷新)~\n格式：亮度 (白天)|亮度 (晚上)\n默认：100|100（均为百分比 1~100，不需要 % 符号）';
+    defaults = '100|100';
+    name = 'menu_customMode4';
+    break;
+    }
+    let newMods = prompt(tip, util.getValue(name));
+    if (newMods === '') {
+        util.setValue(name, defaults);
+    } else if (newMods != null) {
+        util.setValue(name, newMods);
+    }
+    // 护眼模式有排除目标
+    if (currentMode === 3) {
+        tip = '自定义 [护眼模式] 排除目标，修改后立即生效 (部分网页可能需要刷新)~\n格式：CSS 选择器 (如果不会写可以找我)\n默认：img, .img, video, [style*="background"][style*="url"], svg\n (使用英文逗号间隔，末尾不要有逗号)';
+        defaults = 'img, .img, video, [style*="background"][style*="url"], svg';
+        name = 'menu_customMode3_exclude';
+        newMods = prompt(tip, util.getValue(name));
+        if (newMods === '') {
+            util.setValue(name, defaults);
+        } else if (newMods != null) {
+            util.setValue(name, newMods);
+        }
+    }
+    if (document.getElementById('dark-mode-style')) {
+        util.removeElementById('dark-mode-style');
+        main.applyCurrentModeStyle();
+    }
+});
+
+                GM_registerMenuCommand('🕒 自定义昼夜时间', () => {
+    let newMods = prompt('自定义脚本内和白天/晚上相关的时间，修改后刷新网页生效~\n格式：6:00|18:30 (即 6:00 ~ 18:30 之间是白天时间)\n也支持反向设置：14:00|12:00 (即 12:00 ~ 14:00 之间是夜晚时间)', util.getValue('menu_customTime'));
+    if (newMods === '') {
+        util.setValue('menu_customTime', '6:00|18:00');
+    } else if (newMods != null) {
+        util.setValue('menu_customTime', newMods);
+    }
+    location.reload();
+});
+
+                GM_registerMenuCommand('🌙 晚上自动切换模式', () => {
+    let newAutoSwitch = prompt('白天、晚上使用不同模式，修改后立即生效~\n格式：白天模式|晚上模式\n例如：1|3（即白天模式 1 晚上模式 3）\n默认：留空（即关闭该功能）', util.getValue('menu_autoSwitch'));
+    if (newAutoSwitch === '') {
+        util.setValue('menu_autoSwitch', '');
+    } else if (newAutoSwitch != null) {
+        if (newAutoSwitch.split('|').length == 2) {
+            util.setValue('menu_autoSwitch', newAutoSwitch);
+        } else {
+            alert(`填入内容格式错误...`);
+        }
+    }
+    location.reload();
+});
+            }
+        },
+
+        isDarkMode() {
+            return util.getValue('dark_mode') === 'dark';
+        },
+
+        isInExcludeList() {
+            return util.getValue('exclude_list').includes(location.host);
+        },
+
+        isFullScreen() {
+            return document.fullscreenElement;
+        },
+
+        isFirefox() {
+            return /Firefox/i.test(navigator.userAgent);
+        },
+
+        isTopWindow() {
+            return window.self === window.top;
+        },
+
+        addListener() {
+            document.addEventListener("fullscreenchange", (e) => {
+                if (this.isFullScreen()) {
+                    //进入全屏
+                    this.disableDarkMode();
+                } else {
+                    //退出全屏
+                    this.isDarkMode() && this.enableDarkMode();
+                }
+            });
+        },
+
+        firstEnableDarkMode() {
+            if (document.head) {
+                this.isDarkMode() && this.enableDarkMode();
+            }
+            const headObserver = new MutationObserver(() => {
+                this.isDarkMode() && this.enableDarkMode();
+            });
+            headObserver.observe(document.head, {childList: true, subtree: true});
+
+            if (document.body) {
+                this.addButton();
+            } else {
+                const bodyObserver = new MutationObserver(() => {
+                    if (document.body) {
+                        bodyObserver.disconnect();
+                        this.addButton();
+                    }
+                });
+                bodyObserver.observe(document, {childList: true, subtree: true});
+            }
+        },
+
+        init() {
+            this.initValue();
+            this.setThemeColor();
+            this.registerMenuCommand();
+            if (this.isInExcludeList()) return;
+            this.addListener();
+            this.firstEnableDarkMode();
+            this.applyCurrentModeStyle();
+        }
+    };
+    main.init();
+})();
